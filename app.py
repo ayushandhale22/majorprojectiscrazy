@@ -4,6 +4,8 @@ import numpy as np
 from flask import Flask, request, jsonify
 from PIL import Image
 import tensorflow as tf
+from tensorflow.keras.layers import Flatten, Dense, Input
+from tensorflow.keras.models import Model
 
 app = Flask(__name__)
 
@@ -21,11 +23,20 @@ if not os.path.exists(MODEL_PATH):
     print("Model downloaded!")
 
 # ==============================
-# Load Model
+# Load Model and Fix Dense Input
 # ==============================
 print("Loading model...")
-model = tf.keras.models.load_model(MODEL_PATH)
+base_model = tf.keras.models.load_model(MODEL_PATH)
 print("Model loaded successfully!")
+
+# Wrap base_model output with Flatten and new Dense head if needed
+inputs = Input(shape=(224, 224, 3))
+x = base_model(inputs, training=False)  # Output might be 4D
+x = Flatten()(x)  # Flatten 4D tensor into 2D
+x = Dense(256, activation="relu")(x)
+num_classes = x.shape[-1] if hasattr(x, 'shape') else 10  # Adjust num_classes
+outputs = Dense(num_classes, activation="softmax")(x)
+model = Model(inputs, outputs)
 
 # ==============================
 # Prediction Route
@@ -65,3 +76,4 @@ def home():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
