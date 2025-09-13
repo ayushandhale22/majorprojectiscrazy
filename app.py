@@ -1,46 +1,67 @@
 import os
+import requests
 import numpy as np
-import tensorflow as tf
 from flask import Flask, request, jsonify
-
-# === Hugging Face model URL ===
-MODEL_URL = "https://huggingface.co/godoffireandiceandknight/effnet_v2_hugface_upload/resolve/main/effnet_v2.keras"
-
-# === Download and load model (cached in ~/.keras/datasets) ===
-model_path = tf.keras.utils.get_file("effnet_v2.keras", MODEL_URL)
-model = tf.keras.models.load_model(model_path)
-
-# === Class names mapping (use your own trained labels) ===
-class_names = [
-    "Non-Recyclable & Biodegradable",
-    "Non-Recyclable & Non-Biodegradable",
-    "Recyclable & Biodegradable",
-    "Recyclable & Non-Biodegradable"
-]
+from PIL import Image
+import tensorflow as tf
 
 app = Flask(__name__)
 
-@app.route("/")
-def home():
-    return {"status": "ok", "message": "API is running 🚀"}
+# ==============================
+# Download Model from Hugging Face
+# ==============================
+MODEL_URL = "https://huggingface.co/godoffireandiceandknight/effnet_v2_hugface_upload/resolve/main/effnet_v2.keras"
+MODEL_PATH = "effnet_v2.keras"
 
+if not os.path.exists(MODEL_PATH):
+    print("Downloading model from Hugging Face...")
+    r = requests.get(MODEL_URL)
+    with open(MODEL_PATH, "wb") as f:
+        f.write(r.content)
+    print("Model downloaded!")
+
+# ==============================
+# Load Model
+# ==============================
+print("Loading model...")
+model = tf.keras.models.load_model(MODEL_PATH)
+print("Model loaded successfully!")
+
+# ==============================
+# Prediction Route
+# ==============================
 @app.route("/predict", methods=["POST"])
 def predict():
+    if "image" not in request.files:
+        return jsonify({"error": "No image uploaded"}), 400
+
+    file = request.files["image"]
+
     try:
-        # Get uploaded image
-        file = request.files["image"]
+        # Preprocess image
+        img = Image.open(file).convert("RGB").resize((224, 224))
+        arr = np.array(img) / 255.0
+        arr = np.expand_dims(arr, axis=0)
 
-        # Preprocess
-        img = tf.keras.utils.load_img(file, target_size=(224, 224))
-        x = tf.keras.utils.img_to_array(img)
-        x = tf.keras.applications.efficientnet_v2.preprocess_input(x)
-        x = np.expand_dims(x, axis=0)
+        # Prediction
+        preds = model.predict(arr)
+        preds_list = preds.tolist()
 
-        # Predict
-        preds = model.predict(x)
-        class_idx = int(np.argmax(preds))
-        class_label = class_names[class_idx]
+        return jsonify({"prediction": preds_list})
 
-        return jsonify({"class_id": class_idx + 1, "class_label": class_label})
     except Exception as e:
-        return jsonify({"error": str(e)})
+        return jsonify({"error": str(e)}), 500
+
+# ==============================
+# Health Check
+# ==============================
+@app.route("/", methods=["GET"])
+def home():
+    return "✅ Model API is running!"
+
+# ==============================
+# Run App
+# ==============================
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
